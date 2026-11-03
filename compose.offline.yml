@@ -1,0 +1,43 @@
+name: chatbot-offline
+services:
+  mongodb:
+    image: mongo:4.2.20
+    platform: linux/amd64
+    pull_policy: never
+    volumes: ["mongodbdata:/data/db"]
+    healthcheck:
+      test: ["CMD", "mongo", "--quiet", "--eval", "quit(db.adminCommand('ping').ok ? 0 : 1)"]
+      interval: 5s
+      retries: 60
+  backend:
+    image: chatbot-backend:offline
+    platform: linux/amd64
+    pull_policy: never
+    environment:
+      APPLICATION_ENV: Production
+      MONGODB_HOST: mongodb://mongodb:27017
+      LANGCHAIN_TRACING_V2: "false"
+    command: ["bash", "-ec", "python manage.py migrate; python -c 'import asyncio; from app.bot.nlu.pipeline_utils import train_pipeline; asyncio.run(train_pipeline())'; exec fastapi run --host 0.0.0.0 --port 80 --root-path /api"]
+    volumes: ["models:/usr/src/app/model_files"]
+    depends_on:
+      mongodb:
+        condition: service_healthy
+  frontend:
+    image: chatbot-frontend:offline
+    platform: linux/amd64
+    pull_policy: never
+    environment:
+      NEXT_TELEMETRY_DISABLED: "1"
+  gateway:
+    image: nginx:1.13.3-alpine
+    platform: linux/amd64
+    pull_policy: never
+    ports: ["127.0.0.1:8080:80"]
+    volumes: ["./source/scripts/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro"]
+    depends_on: [backend, frontend]
+networks:
+  default:
+    internal: true
+volumes:
+  mongodbdata:
+  models:
